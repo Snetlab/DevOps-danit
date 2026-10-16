@@ -1,0 +1,11 @@
+[Unit]
+Description=Watch directory for new files
+
+[Service]
+Type=simple
+ExecStart=%h/bash_script/watch.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
