@@ -1,0 +1,127 @@
+@Library('sharedLibrary') _
+
+def serviceImageMap = [
+        'abstract-module'                 : 'dream-abstract-module',
+        'config-service'                  : 'dream-config-service',
+        'document-linker'                 : 'dream-document-linker',
+        'response-service'                : 'dream-response-service',
+        'release-api-service'             : 'dream-release-api-service',
+        'release-creator-service'         : 'dream-release-creator-service',
+        'data-change-tracking-service'    : 'dream-data-change-tracking-service',
+        'notification-translator-service' : 'dream-notification-translator-service'
+]
+
+def helmValuesFileMap = [
+        'abstract-module'                 : 'dream-abstract-module-values.yaml',
+        'config-service'                  : 'dream-config-service-values.yaml',
+        'document-linker'                 : 'dream-document-linker-service-values.yaml',
+        'response-service'                : 'dream-response-service-values.yaml',
+        'release-api-service'             : 'dream-release-api-service-values.yaml',
+        'release-creator-service'         : 'dream-release-creator-service-values.yaml',
+        'data-change-tracking-service'    : 'dream-data-change-tracking-service-values.yaml',
+        'notification-translator-service' : 'dream-notification-translator-service-values.yaml'
+]
+
+properties([
+        parameters([
+                choice(
+                        name: 'ENVIRONMENT',
+                        choices: ['dev', 'qa1', 'qa0'],
+                        description: 'ENVIRONMENT'
+                ),
+                choice(
+                        name: 'SERVICE_NAME',
+                        choices: serviceImageMap.keySet().toList(),
+                        description: 'SERVICE'
+                ),
+                string(
+                        name: 'IMAGE_TAG_FILTER',
+                        defaultValue: '',
+                        description: 'Optional filter for IMAGE_TAG, for example: rc-0.4, dev, main, e60'
+                ),
+                nexusDockerImages.imageTagParam([
+                        name             : 'IMAGE_TAG',
+                        serviceParameter : 'SERVICE_NAME',
+                        filterParameter  : 'IMAGE_TAG_FILTER',
+                        imageMap         : serviceImageMap,
+                        description      : 'Image tag from Nexus'
+                ])
+        ])
+])
+
+pipeline {
+    agent any
+
+    environment {
+        HELM_VALUES_REPO = 'https://bitbucket.org/ustudio-llc/helm-values.git'
+        JENKINS_HELM_VALUES_REPO = 'helm-values-key'
+        NEXUS_DOCKER_REGISTRY = 'nexus-docker.fabrica.ustudio.company'
+    }
+
+    stages {
+        stage('Validate parameters') {
+            steps {
+                script {
+                    if (!params.ENVIRONMENT?.trim()) {
+                        error "ENVIRONMENT is empty"
+                    }
+
+                    if (!params.SERVICE_NAME?.trim()) {
+                        error "SERVICE_NAME is empty"
+                    }
+
+                    if (!params.IMAGE_TAG?.trim()) {
+                        error "IMAGE_TAG is empty"
+                    }
+
+                    if (params.IMAGE_TAG.startsWith('ERROR') || params.IMAGE_TAG.startsWith('Select')) {
+                        error "Invalid IMAGE_TAG selected: ${params.IMAGE_TAG}"
+                    }
+
+                    if (!serviceImageMap[params.SERVICE_NAME]) {
+                        error "Unknown SERVICE_NAME: ${params.SERVICE_NAME}"
+                    }
+
+                    if (!helmValuesFileMap[params.SERVICE_NAME]) {
+                        error "Helm values file is not configured for SERVICE_NAME: ${params.SERVICE_NAME}"
+                    }
+
+                    echo """
+Selected parameters:
+ENVIRONMENT      = ${params.ENVIRONMENT}
+SERVICE_NAME     = ${params.SERVICE_NAME}
+IMAGE_TAG_FILTER = ${params.IMAGE_TAG_FILTER}
+IMAGE_TAG        = ${params.IMAGE_TAG}
+"""
+                }
+            }
+        }
+
+        stage('Run CD Pipeline') {
+            steps {
+                script {
+                    def imageName = serviceImageMap[params.SERVICE_NAME]
+                    def valuesFile = helmValuesFileMap[params.SERVICE_NAME]
+
+                    def context = [
+                            repoUrl         : env.HELM_VALUES_REPO,
+                            branch          : 'main',
+                            filePath        : "${params.ENVIRONMENT}/${valuesFile}",
+                            imageTag        : params.IMAGE_TAG,
+                            imageRepository : "${env.NEXUS_DOCKER_REGISTRY}/${imageName}",
+                            imagePush       : true,
+                            credentialsId   : env.JENKINS_HELM_VALUES_REPO
+                    ]
+
+                    if (!context.imageTag || !context.imageRepository || !context.filePath || !context.repoUrl) {
+                        error "Missing required CD context parameters"
+                    }
+
+                    echo "CD Pipeline Context: ${context}"
+                    def cdContext = runCDPipeline(context)
+                    echo "CD Context: ${cdContext}"
+                }
+            }
+        }
+    }
+}
