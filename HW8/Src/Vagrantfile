@@ -1,0 +1,36 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+  # Ubuntu 22.04 LTS (VirtualBox)
+  config.vm.box = "ubuntu/jammy64"
+  config.vm.hostname = "nginx-vm"
+  config.vm.boot_timeout = 600
+
+  config.vm.network "public_network"
+
+  config.vm.provider "virtualbox" do |vb|
+    vb.name = "nginx-vm"
+    vb.name = "nginx-vm"
+    vb.memory = 4024
+    vb.cpus = 4
+    vb.gui = true                                      # показати вікно ВМ
+    vb.customize ["modifyvm", :id, "--uartmode1", "disconnected"]
+  end
+
+  config.vm.provision "shell", inline: <<-SHELL
+    apt-get update
+    apt-get install -y nginx
+
+    # Заміна порту
+    sed -i 's/listen 80 default_server;/listen 82 default_server;/' /etc/nginx/sites-available/default
+    sed -i 's/listen \[::\]:80 default_server;/listen [::]:82 default_server;/' /etc/nginx/sites-available/default
+
+    systemctl enable nginx
+    systemctl restart nginx
+  SHELL
+
+  config.vm.provision "shell", run: "always", inline: <<-SHELL
+    echo "Ваш ip: http://$(ip -4 -o addr show enp0s8 | awk '{print $4}' | cut -d/ -f1):82"
+  SHELL
+end
